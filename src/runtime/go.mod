@@ -30,7 +30,7 @@ require (
 	github.com/go-openapi/swag v0.18.0
 	github.com/go-openapi/validate v0.18.0
 	github.com/gogo/googleapis v1.4.0 // indirect
-	github.com/gogo/protobuf v1.3.1
+	github.com/gogo/protobuf v1.3.2
 	github.com/hashicorp/go-multierror v1.0.0
 	github.com/intel/govmm v0.0.0-20200825065022-6042f6033126
 	github.com/mdlayher/vsock v0.0.0-20191108225356-d9c65923cb8f
@@ -56,9 +56,9 @@ require (
 	github.com/vishvananda/netlink v1.0.1-0.20190604022042-c8c507c80ea2
 	github.com/vishvananda/netns v0.0.0-20180720170159-13995c7128cc
 	go.uber.org/atomic v1.6.0 // indirect
-	golang.org/x/net v0.0.0-20200707034311-ab3426394381
+	golang.org/x/net v0.0.0-20201021035429-f5854403a974
 	golang.org/x/oauth2 v0.0.0-20191122200657-5d9234df094c
-	golang.org/x/sys v0.0.0-20200622214017-ed371f2e16b4
+	golang.org/x/sys v0.0.0-20200930185726-fdedc70b468f
 	google.golang.org/grpc v1.19.0
 	gotest.tools v2.2.0+incompatible // indirect
 	k8s.io/apimachinery v0.18.2
