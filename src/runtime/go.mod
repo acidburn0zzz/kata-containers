@@ -56,9 +56,9 @@ require (
 	github.com/vishvananda/netlink v1.0.1-0.20190604022042-c8c507c80ea2
 	github.com/vishvananda/netns v0.0.0-20180720170159-13995c7128cc
 	go.uber.org/atomic v1.6.0 // indirect
-	golang.org/x/net v0.0.0-20200707034311-ab3426394381
+	golang.org/x/net v0.7.0
 	golang.org/x/oauth2 v0.0.0-20191122200657-5d9234df094c
-	golang.org/x/sys v0.0.0-20200622214017-ed371f2e16b4
+	golang.org/x/sys v0.5.0
 	google.golang.org/grpc v1.19.0
 	gotest.tools v2.2.0+incompatible // indirect
 	k8s.io/apimachinery v0.18.2
