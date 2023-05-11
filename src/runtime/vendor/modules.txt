@@ -146,7 +146,7 @@ github.com/davecgh/go-spew/spew
 # github.com/dlespiau/covertool v0.0.0-20180314162135-b0c4c6d0583a
 ## explicit
 github.com/dlespiau/covertool/pkg/cover
-# github.com/docker/distribution v2.7.1+incompatible
+# github.com/docker/distribution v2.8.2+incompatible
 ## explicit
 github.com/docker/distribution/digestset
 github.com/docker/distribution/reference
