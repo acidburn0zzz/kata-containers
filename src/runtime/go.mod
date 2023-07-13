@@ -17,7 +17,7 @@ require (
 	github.com/containerd/go-runc v0.0.0-20200220073739-7016d3ce2328 // indirect
 	github.com/containerd/ttrpc v1.0.0
 	github.com/containerd/typeurl v1.0.1-0.20190228175220-2a93cfde8c20
-	github.com/containernetworking/plugins v0.8.2
+	github.com/containernetworking/plugins v0.8.6
 	github.com/cri-o/cri-o v1.0.0-rc2.0.20170928185954-3394b3b2d6af
 	github.com/dlespiau/covertool v0.0.0-20180314162135-b0c4c6d0583a
 	github.com/docker/distribution v2.7.1+incompatible // indirect
