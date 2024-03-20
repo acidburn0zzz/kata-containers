@@ -1,23 +1,31 @@
 // Package stringid provides helper functions for dealing with string identifiers
-package stringid
+package stringid // import "github.com/docker/docker/pkg/stringid"
 
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"io"
+	"errors"
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/docker/docker/pkg/random"
 )
 
-const shortLen = 12
+const (
+	shortLen = 12
+	fullLen  = 64
+)
 
-var validShortID = regexp.MustCompile("^[a-z0-9]{12}$")
+var (
+	validShortID = regexp.MustCompile("^[a-f0-9]{12}$")
+	validHex     = regexp.MustCompile(`^[a-f0-9]{64}$`)
+)
 
-// IsShortID determines if an arbitrary string *looks like* a short ID.
+// IsShortID determines if id has the correct format and length for a short ID.
+// It checks the IDs length and if it consists of valid characters for IDs (a-f0-9).
 func IsShortID(id string) bool {
+	if len(id) != shortLen {
+		return false
+	}
 	return validShortID.MatchString(id)
 }
 
@@ -35,14 +43,11 @@ func TruncateID(id string) string {
 	return id
 }
 
-func generateID(crypto bool) string {
+// GenerateRandomID returns a unique id.
+func GenerateRandomID() string {
 	b := make([]byte, 32)
-	r := random.Reader
-	if crypto {
-		r = rand.Reader
-	}
 	for {
-		if _, err := io.ReadFull(r, b); err != nil {
+		if _, err := rand.Read(b); err != nil {
 			panic(err) // This shouldn't happen
 		}
 		id := hex.EncodeToString(b)
@@ -56,14 +61,13 @@ func generateID(crypto bool) string {
 	}
 }
 
-// GenerateRandomID returns a unique id.
-func GenerateRandomID() string {
-	return generateID(true)
-}
-
-// GenerateNonCryptoID generates unique id without using cryptographically
-// secure sources of random.
-// It helps you to save entropy.
-func GenerateNonCryptoID() string {
-	return generateID(false)
+// ValidateID checks whether an ID string is a valid, full-length image ID.
+func ValidateID(id string) error {
+	if len(id) != fullLen {
+		return errors.New("image ID '" + id + "' is invalid")
+	}
+	if !validHex.MatchString(id) {
+		return errors.New("image ID '" + id + "' is invalid")
+	}
+	return nil
 }
