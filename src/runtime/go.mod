@@ -21,7 +21,7 @@ require (
 	github.com/cri-o/cri-o v1.0.0-rc2.0.20170928185954-3394b3b2d6af
 	github.com/dlespiau/covertool v0.0.0-20180314162135-b0c4c6d0583a
 	github.com/docker/distribution v2.7.1+incompatible // indirect
-	github.com/docker/docker v1.13.1 // indirect
+	github.com/docker/docker v24.0.9+incompatible // indirect
 	github.com/docker/go-events v0.0.0-20190806004212-e31b211e4f1c // indirect
 	github.com/go-ini/ini v1.28.2
 	github.com/go-openapi/errors v0.18.0
