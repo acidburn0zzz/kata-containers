@@ -22,7 +22,10 @@ import (
 	"os"
 )
 
-var ErrNotAConsole = errors.New("provided file is not a console")
+var (
+	ErrNotAConsole    = errors.New("provided file is not a console")
+	ErrNotImplemented = errors.New("not implemented")
+)
 
 type File interface {
 	io.ReadWriteCloser
@@ -45,7 +48,7 @@ type Console interface {
 	SetRaw() error
 	// DisableEcho disables echo on the console
 	DisableEcho() error
-	// Reset restores the console to its orignal state
+	// Reset restores the console to its original state
 	Reset() error
 	// Size returns the window size of the console
 	Size() (WinSize, error)
@@ -61,18 +64,24 @@ type WinSize struct {
 	y     uint16
 }
 
-// Current returns the current processes console
-func Current() Console {
-	c, err := ConsoleFromFile(os.Stdin)
-	if err != nil {
-		// stdin should always be a console for the design
-		// of this function
-		panic(err)
+// Current returns the current process' console
+func Current() (c Console) {
+	var err error
+	// Usually all three streams (stdin, stdout, and stderr)
+	// are open to the same console, but some might be redirected,
+	// so try all three.
+	for _, s := range []*os.File{os.Stderr, os.Stdout, os.Stdin} {
+		if c, err = ConsoleFromFile(s); err == nil {
+			return c
+		}
 	}
-	return c
+	// One of the std streams should always be a console
+	// for the design of this function.
+	panic(err)
 }
 
 // ConsoleFromFile returns a console using the provided file
+// nolint:revive
 func ConsoleFromFile(f File) (Console, error) {
 	if err := checkConsole(f); err != nil {
 		return nil, err

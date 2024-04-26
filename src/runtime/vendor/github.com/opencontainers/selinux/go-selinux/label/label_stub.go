@@ -1,4 +1,5 @@
-// +build !selinux !linux
+//go:build !linux
+// +build !linux
 
 package label
 
@@ -13,10 +14,6 @@ func InitLabels(options []string) (string, string, error) {
 // to the official API. Use InitLabels(strings.Fields(options)) instead.
 func GenLabels(options string) (string, string, error) {
 	return "", "", nil
-}
-
-func FormatMountLabel(src string, mountLabel string) string {
-	return src
 }
 
 func SetFileLabel(path string, fileLabel string) error {
@@ -34,7 +31,6 @@ func Relabel(path string, fileLabel string, shared bool) error {
 // DisableSecOpt returns a security opt that can disable labeling
 // support for future container processes
 func DisableSecOpt() []string {
-	// TODO the selinux.DisableSecOpt stub returns []string{"disable"} instead of "nil"
 	return nil
 }
 
