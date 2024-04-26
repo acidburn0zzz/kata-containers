@@ -7,9 +7,11 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/opencontainers/runtime-spec/specs-go"
-
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
+
+	"github.com/opencontainers/runc/libcontainer/devices"
+	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
 type Rlimit struct {
@@ -20,9 +22,9 @@ type Rlimit struct {
 
 // IDMap represents UID/GID Mappings for User Namespaces.
 type IDMap struct {
-	ContainerID int `json:"container_id"`
-	HostID      int `json:"host_id"`
-	Size        int `json:"size"`
+	ContainerID int64 `json:"container_id"`
+	HostID      int64 `json:"host_id"`
+	Size        int64 `json:"size"`
 }
 
 // Seccomp represents syscall restrictions
@@ -30,9 +32,13 @@ type IDMap struct {
 // for syscalls. Additional architectures can be added by specifying them in
 // Architectures.
 type Seccomp struct {
-	DefaultAction Action     `json:"default_action"`
-	Architectures []string   `json:"architectures"`
-	Syscalls      []*Syscall `json:"syscalls"`
+	DefaultAction    Action                   `json:"default_action"`
+	Architectures    []string                 `json:"architectures"`
+	Flags            []specs.LinuxSeccompFlag `json:"flags"`
+	Syscalls         []*Syscall               `json:"syscalls"`
+	DefaultErrnoRet  *uint                    `json:"default_errno_ret"`
+	ListenerPath     string                   `json:"listener_path,omitempty"`
+	ListenerMetadata string                   `json:"listener_metadata,omitempty"`
 }
 
 // Action is taken upon rule match in Seccomp
@@ -45,6 +51,9 @@ const (
 	Allow
 	Trace
 	Log
+	Notify
+	KillThread
+	KillProcess
 )
 
 // Operator is a comparison operator to be used when matching syscall arguments in Seccomp
@@ -70,13 +79,11 @@ type Arg struct {
 
 // Syscall is a rule to match a syscall in Seccomp
 type Syscall struct {
-	Name   string `json:"name"`
-	Action Action `json:"action"`
-	Args   []*Arg `json:"args"`
+	Name     string `json:"name"`
+	Action   Action `json:"action"`
+	ErrnoRet *uint  `json:"errnoRet"`
+	Args     []*Arg `json:"args"`
 }
-
-// TODO Windows. Many of these fields should be factored out into those parts
-// which are common across platforms, and those which are platform specific.
 
 // Config defines configuration options for executing a process inside a contained environment.
 type Config struct {
@@ -91,6 +98,9 @@ type Config struct {
 	// Path to a directory containing the container's root filesystem.
 	Rootfs string `json:"rootfs"`
 
+	// Umask is the umask to use inside of the container.
+	Umask *uint32 `json:"umask"`
+
 	// Readonlyfs will remount the container's rootfs as readonly where only externally mounted
 	// bind mounts are writtable.
 	Readonlyfs bool `json:"readonlyfs"`
@@ -103,12 +113,15 @@ type Config struct {
 	Mounts []*Mount `json:"mounts"`
 
 	// The device nodes that should be automatically created within the container upon container start.  Note, make sure that the node is marked as allowed in the cgroup as well!
-	Devices []*Device `json:"devices"`
+	Devices []*devices.Device `json:"devices"`
 
 	MountLabel string `json:"mount_label"`
 
 	// Hostname optionally sets the container's hostname if provided
 	Hostname string `json:"hostname"`
+
+	// Domainname optionally sets the container's domainname if provided
+	Domainname string `json:"domainname"`
 
 	// Namespaces specifies the container's namespaces that it should setup when cloning the init process
 	// If a namespace is not provided that namespace is shared from the container's parent process
@@ -147,11 +160,11 @@ type Config struct {
 	// More information about kernel oom score calculation here: https://lwn.net/Articles/317814/
 	OomScoreAdj *int `json:"oom_score_adj,omitempty"`
 
-	// UidMappings is an array of User ID mappings for User Namespaces
-	UidMappings []IDMap `json:"uid_mappings"`
+	// UIDMappings is an array of User ID mappings for User Namespaces
+	UIDMappings []IDMap `json:"uid_mappings"`
 
-	// GidMappings is an array of Group ID mappings for User Namespaces
-	GidMappings []IDMap `json:"gid_mappings"`
+	// GIDMappings is an array of Group ID mappings for User Namespaces
+	GIDMappings []IDMap `json:"gid_mappings"`
 
 	// MaskPaths specifies paths within the container's rootfs to mask over with a bind
 	// mount pointing to /dev/null as to prevent reads of the file.
@@ -175,7 +188,7 @@ type Config struct {
 
 	// Hooks are a collection of actions to perform at various container lifecycle events.
 	// CommandHooks are serialized to JSON, but other hooks are not.
-	Hooks *Hooks
+	Hooks Hooks
 
 	// Version is the version of opencontainer specification that is supported.
 	Version string `json:"version"`
@@ -200,18 +213,136 @@ type Config struct {
 	// RootlessCgroups is set when unlikely to have the full access to cgroups.
 	// When RootlessCgroups is set, cgroups errors are ignored.
 	RootlessCgroups bool `json:"rootless_cgroups,omitempty"`
+
+	// TimeOffsets specifies the offset for supporting time namespaces.
+	TimeOffsets map[string]specs.LinuxTimeOffset `json:"time_offsets,omitempty"`
+
+	// Scheduler represents the scheduling attributes for a process.
+	Scheduler *Scheduler `json:"scheduler,omitempty"`
+
+	// Personality contains configuration for the Linux personality syscall.
+	Personality *LinuxPersonality `json:"personality,omitempty"`
+
+	// IOPriority is the container's I/O priority.
+	IOPriority *IOPriority `json:"io_priority,omitempty"`
 }
 
-type Hooks struct {
+// Scheduler is based on the Linux sched_setattr(2) syscall.
+type Scheduler = specs.Scheduler
+
+// ToSchedAttr is to convert *configs.Scheduler to *unix.SchedAttr.
+func ToSchedAttr(scheduler *Scheduler) (*unix.SchedAttr, error) {
+	var policy uint32
+	switch scheduler.Policy {
+	case specs.SchedOther:
+		policy = 0
+	case specs.SchedFIFO:
+		policy = 1
+	case specs.SchedRR:
+		policy = 2
+	case specs.SchedBatch:
+		policy = 3
+	case specs.SchedISO:
+		policy = 4
+	case specs.SchedIdle:
+		policy = 5
+	case specs.SchedDeadline:
+		policy = 6
+	default:
+		return nil, fmt.Errorf("invalid scheduler policy: %s", scheduler.Policy)
+	}
+
+	var flags uint64
+	for _, flag := range scheduler.Flags {
+		switch flag {
+		case specs.SchedFlagResetOnFork:
+			flags |= 0x01
+		case specs.SchedFlagReclaim:
+			flags |= 0x02
+		case specs.SchedFlagDLOverrun:
+			flags |= 0x04
+		case specs.SchedFlagKeepPolicy:
+			flags |= 0x08
+		case specs.SchedFlagKeepParams:
+			flags |= 0x10
+		case specs.SchedFlagUtilClampMin:
+			flags |= 0x20
+		case specs.SchedFlagUtilClampMax:
+			flags |= 0x40
+		default:
+			return nil, fmt.Errorf("invalid scheduler flag: %s", flag)
+		}
+	}
+
+	return &unix.SchedAttr{
+		Size:     unix.SizeofSchedAttr,
+		Policy:   policy,
+		Flags:    flags,
+		Nice:     scheduler.Nice,
+		Priority: uint32(scheduler.Priority),
+		Runtime:  scheduler.Runtime,
+		Deadline: scheduler.Deadline,
+		Period:   scheduler.Period,
+	}, nil
+}
+
+var IOPrioClassMapping = map[specs.IOPriorityClass]int{
+	specs.IOPRIO_CLASS_RT:   1,
+	specs.IOPRIO_CLASS_BE:   2,
+	specs.IOPRIO_CLASS_IDLE: 3,
+}
+
+type IOPriority = specs.LinuxIOPriority
+
+type (
+	HookName string
+	HookList []Hook
+	Hooks    map[HookName]HookList
+)
+
+const (
 	// Prestart commands are executed after the container namespaces are created,
 	// but before the user supplied command is executed from init.
-	Prestart []Hook
+	// Note: This hook is now deprecated
+	// Prestart commands are called in the Runtime namespace.
+	Prestart HookName = "prestart"
+
+	// CreateRuntime commands MUST be called as part of the create operation after
+	// the runtime environment has been created but before the pivot_root has been executed.
+	// CreateRuntime is called immediately after the deprecated Prestart hook.
+	// CreateRuntime commands are called in the Runtime Namespace.
+	CreateRuntime HookName = "createRuntime"
+
+	// CreateContainer commands MUST be called as part of the create operation after
+	// the runtime environment has been created but before the pivot_root has been executed.
+	// CreateContainer commands are called in the Container namespace.
+	CreateContainer HookName = "createContainer"
+
+	// StartContainer commands MUST be called as part of the start operation and before
+	// the container process is started.
+	// StartContainer commands are called in the Container namespace.
+	StartContainer HookName = "startContainer"
 
 	// Poststart commands are executed after the container init process starts.
-	Poststart []Hook
+	// Poststart commands are called in the Runtime Namespace.
+	Poststart HookName = "poststart"
 
 	// Poststop commands are executed after the container init process exits.
-	Poststop []Hook
+	// Poststop commands are called in the Runtime Namespace.
+	Poststop HookName = "poststop"
+)
+
+// KnownHookNames returns the known hook names.
+// Used by `runc features`.
+func KnownHookNames() []string {
+	return []string{
+		string(Prestart), // deprecated
+		string(CreateRuntime),
+		string(CreateContainer),
+		string(StartContainer),
+		string(Poststart),
+		string(Poststop),
+	}
 }
 
 type Capabilities struct {
@@ -227,32 +358,40 @@ type Capabilities struct {
 	Ambient []string
 }
 
-func (hooks *Hooks) UnmarshalJSON(b []byte) error {
-	var state struct {
-		Prestart  []CommandHook
-		Poststart []CommandHook
-		Poststop  []CommandHook
+// Deprecated: use (Hooks).Run instead.
+func (hooks HookList) RunHooks(state *specs.State) error {
+	for i, h := range hooks {
+		if err := h.Run(state); err != nil {
+			return fmt.Errorf("error running hook #%d: %w", i, err)
+		}
 	}
+
+	return nil
+}
+
+func (hooks *Hooks) UnmarshalJSON(b []byte) error {
+	var state map[HookName][]CommandHook
 
 	if err := json.Unmarshal(b, &state); err != nil {
 		return err
 	}
 
-	deserialize := func(shooks []CommandHook) (hooks []Hook) {
-		for _, shook := range shooks {
-			hooks = append(hooks, shook)
+	*hooks = Hooks{}
+	for n, commandHooks := range state {
+		if len(commandHooks) == 0 {
+			continue
 		}
 
-		return hooks
+		(*hooks)[n] = HookList{}
+		for _, h := range commandHooks {
+			(*hooks)[n] = append((*hooks)[n], h)
+		}
 	}
 
-	hooks.Prestart = deserialize(state.Prestart)
-	hooks.Poststart = deserialize(state.Poststart)
-	hooks.Poststop = deserialize(state.Poststop)
 	return nil
 }
 
-func (hooks Hooks) MarshalJSON() ([]byte, error) {
+func (hooks *Hooks) MarshalJSON() ([]byte, error) {
 	serialize := func(hooks []Hook) (serializableHooks []CommandHook) {
 		for _, hook := range hooks {
 			switch chook := hook.(type) {
@@ -267,10 +406,25 @@ func (hooks Hooks) MarshalJSON() ([]byte, error) {
 	}
 
 	return json.Marshal(map[string]interface{}{
-		"prestart":  serialize(hooks.Prestart),
-		"poststart": serialize(hooks.Poststart),
-		"poststop":  serialize(hooks.Poststop),
+		"prestart":        serialize((*hooks)[Prestart]),
+		"createRuntime":   serialize((*hooks)[CreateRuntime]),
+		"createContainer": serialize((*hooks)[CreateContainer]),
+		"startContainer":  serialize((*hooks)[StartContainer]),
+		"poststart":       serialize((*hooks)[Poststart]),
+		"poststop":        serialize((*hooks)[Poststop]),
 	})
+}
+
+// Run executes all hooks for the given hook name.
+func (hooks Hooks) Run(name HookName, state *specs.State) error {
+	list := hooks[name]
+	for i, h := range list {
+		if err := h.Run(state); err != nil {
+			return fmt.Errorf("error running %s hook #%d: %w", name, i, err)
+		}
+	}
+
+	return nil
 }
 
 type Hook interface {
@@ -333,7 +487,7 @@ func (c Command) Run(s *specs.State) error {
 	go func() {
 		err := cmd.Wait()
 		if err != nil {
-			err = fmt.Errorf("error running hook: %v, stdout: %s, stderr: %s", err, stdout.String(), stderr.String())
+			err = fmt.Errorf("%w, stdout: %s, stderr: %s", err, stdout.String(), stderr.String())
 		}
 		errC <- err
 	}()
@@ -347,8 +501,8 @@ func (c Command) Run(s *specs.State) error {
 	case err := <-errC:
 		return err
 	case <-timerCh:
-		cmd.Process.Kill()
-		cmd.Wait()
+		_ = cmd.Process.Kill()
+		<-errC
 		return fmt.Errorf("hook ran past specified timeout of %.1fs", c.Timeout.Seconds())
 	}
 }
